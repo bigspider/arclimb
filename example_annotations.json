@@ -1,0 +1,17 @@
+[
+    {
+        "annotations": [
+            {
+                "class": "correspondence",
+                "x1": "318.632120678",
+                "x2": "1372.17381001",
+                "y1": "447.112814499",
+                "y2": "183.299123185"
+            }
+        ],
+        "class": "pair",
+        "filename": "ex1.pair",
+        "left_fn": "dwscampione1.jpg",
+        "right_fn": "dwscampione2.jpg"
+    }
+]
