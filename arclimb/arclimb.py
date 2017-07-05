@@ -29,7 +29,7 @@ class SIFTMatcher(Matcher):
         # Apply ratio test
         res = []
         for m, n in matches:
-            if m.distance < 0.8 * n.distance:
+            if m.distance < 0.75 * n.distance:
                 res.append(m)
         return res, kp1, kp2
 
@@ -53,7 +53,7 @@ class ORBMatcher(Matcher):
         # Apply ratio test
         res = []
         for m, n in matches:
-            if m.distance < 0.8 * n.distance:
+            if m.distance < 0.75 * n.distance:
                 res.append(m)
         return res, kp1, kp2
 
