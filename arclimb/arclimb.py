@@ -33,6 +33,7 @@ class SIFTMatcher(Matcher):
                 res.append(m)
         return res, kp1, kp2
 
+
 class ORBMatcher(Matcher):
     def __init__(self, nfeatures = 500):
         super().__init__()
@@ -56,11 +57,13 @@ class ORBMatcher(Matcher):
                 res.append(m)
         return res, kp1, kp2
 
+
 class HomographyFilter(Matcher):
-    '''Given another Matcher as input, this decorator returns another Matcher that attempts to
+    """
+    Given another Matcher as input, this decorator returns another Matcher that attempts to
     refine the match by removing the best homography and removing the matching points that don't agree
     with the homography.
-    '''
+    """
     MIN_MATCH_COUNT = 10
 
     def __init__(self, matcher, threshold=0.2):
