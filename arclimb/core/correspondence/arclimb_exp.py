@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from arclimb import *
+from .arclimb import *
 
 from scipy.spatial import KDTree
 

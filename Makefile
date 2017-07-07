@@ -7,3 +7,6 @@ arc: *.py
 
 sloth: *.py
 	cd sloth && python3 setup.py install && cd ..
+
+test:
+	pytest --ignore=sloth
