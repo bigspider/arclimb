@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 
+from scipy.spatial import KDTree
 
 class Matcher:
     def __init__(self):
