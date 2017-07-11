@@ -1,0 +1,1 @@
+from .pairtagger import ImagePairEditorDialog
