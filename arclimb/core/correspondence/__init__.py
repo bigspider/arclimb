@@ -1,1 +1,1 @@
-from .correspondence import ORBMatcher, DoubleORBMatcher, SIFTMatcher, HomographyFilter, Matcher
+from .correspondence import ORBMatcher, DoubleORBMatcher, SIFTMatcher, HomographyFilter, Matcher, CorrespondenceFinder

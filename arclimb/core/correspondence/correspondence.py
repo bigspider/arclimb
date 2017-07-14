@@ -3,6 +3,10 @@ import numpy as np
 
 from scipy.spatial import KDTree
 
+from core.graph import Correspondence, Point
+from typing import List
+
+
 class Matcher:
     def __init__(self):
         pass
@@ -121,7 +125,7 @@ class DoubleORBMatcher(Matcher):
         M, _ = cv2.findHomography(initial_src_pts, initial_dst_pts, method=cv2.RANSAC,ransacReprojThreshold=5.0)
 
         ##Debug code: print the homography and save the result
-        #w, h, *_ = image1.shape
+        #h, w, *_ = image1.shape
         #corners_src = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
         #corners_dst = cv2.perspectiveTransform(corners_src, M)
         #temp = cv2.polylines(image2, [np.int32(corners_dst)], True, 255, 3, cv2.LINE_AA)
@@ -215,11 +219,10 @@ class DoubleORBMatcher(Matcher):
 
         # TODO: tune parameters, add constructor arguments
         self._fastORBMatcher = ORBMatcher(nfeatures=1000)
-        self._orb = cv2.ORB_create(nfeatures=3000)  # ORB detector with many more points
+        self._orb = cv2.ORB_create(nfeatures=1000)  # ORB detector with many more points
 
     def match(self, image1, image2):
-        initial_matches, initial_kp1, initial_kp2 = self._fastORBMatcher.match(image1,
-                                                                               image2)  # TODO: parameter tuning
+        initial_matches, initial_kp1, initial_kp2 = self._fastORBMatcher.match(image1, image2)  # TODO: parameter tuning
 
         initial_src_pts = np.float32([initial_kp1[m.queryIdx].pt for m in initial_matches]).reshape(-1, 1, 2)
         initial_dst_pts = np.float32([initial_kp2[m.trainIdx].pt for m in initial_matches]).reshape(-1, 1, 2)
@@ -227,7 +230,7 @@ class DoubleORBMatcher(Matcher):
         M, _ = cv2.findHomography(initial_src_pts, initial_dst_pts, method=cv2.RANSAC, ransacReprojThreshold=5.0)
 
         ##Debug code: print the homography and save the result
-        # w, h, *_ = image1.shape
+        # h, w, *_ = image1.shape
         # corners_src = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
         # corners_dst = cv2.perspectiveTransform(corners_src, M)
         # temp = cv2.polylines(image2, [np.int32(corners_dst)], True, 255, 3, cv2.LINE_AA)
@@ -273,7 +276,7 @@ class DoubleORBMatcher(Matcher):
                 # Add the match only only there is one with the same source keypoint (not sure if this ever happens)
                 # or if it passes the ratio test
                 if second_best_idx is None or best_dist < 0.75 * second_best_dist:
-                    matches.append(cv2.DMatch(pt1_idx, best_idx, best_idx))
+                    matches.append(cv2.DMatch(pt1_idx, best_idx, best_dist))
 
         # Now keep adding the best matches, but skip if the source points are too close
         matches = sorted(matches, key=lambda x: x.distance)
@@ -312,3 +315,26 @@ class ORBMatcherBF(Matcher):
         matches = sorted(matches, key=lambda x: x.distance)
 
         return matches, kp1, kp2
+
+
+#Convenience class to transform te output of a Matcher to a list of Correspondences
+class CorrespondenceFinder():
+    def __init__(self, matcher: Matcher):
+        self.matcher = matcher
+
+    def find_correspondences(self, image1, image2) -> List[Correspondence]:
+        matches, kp1, kp2 = self.matcher.match(image1, image2)
+
+        h1, w1, *_ = image1.shape
+        h2, w2, *_ = image2.shape
+
+        result = []
+        for match in matches:
+            pt1 = kp1[match.queryIdx].pt
+            pt2 = kp2[match.trainIdx].pt
+            result.append(Correspondence(
+                Point(pt1[0]/w1, pt1[1]/h1),
+                Point(pt2[0]/w2, pt2[1]/h2)
+            ))
+
+        return result

@@ -5,6 +5,10 @@ from arclimb.core import Point, Correspondence
 
 from typing import List, Union, Any, NewType
 
+import cv2
+
+from core.correspondence import DoubleORBMatcher, CorrespondenceFinder
+from core.utils.image import scale_down_image
 
 def _pointToRelativeCoordinates(pt: Union[Point, QtCore.QPointF], rect: QtCore.QRectF) -> Point:
     if type(pt) == QtCore.QPointF:
@@ -38,7 +42,7 @@ class PointItem(BaseItem):
     """
 
     TYPE = QtGui.QGraphicsItem.UserType + 1
-    RADIUS = 3
+    RADIUS = 4
 
     def type(self):
         return PointItem.TYPE
@@ -76,6 +80,11 @@ class PointItem(BaseItem):
     def boundingRect(self):
         r = PointItem.RADIUS
         return QtCore.QRectF(-r, -r, 2 * r, 2 * r)
+
+    def shape(self):
+        path = QtGui.QPainterPath()
+        path.addEllipse(self.boundingRect());
+        return path;
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
@@ -139,6 +148,7 @@ class CorrespondenceItem(BaseItem):
         self.destPoint = QtCore.QPointF()
 
         self.setAcceptedMouseButtons(QtCore.Qt.NoButton)
+        self.setCursor(Qt.ArrowCursor)
 
         self.sourceNode = sourceNode
         self.destinationNode = destNode
@@ -179,6 +189,18 @@ class CorrespondenceItem(BaseItem):
                 QtCore.QSizeF(self.destPoint.x() - self.sourcePoint.x(),
                               self.destPoint.y() - self.sourcePoint.y())).normalized()
 
+    def shape(self):
+        path = QtGui.QPainterPath()
+        polygon = QtGui.QPolygonF()
+
+        #Make sure that the line is a few pixels wide for interaction purposes
+        polygon.append(self.sourcePoint + QtCore.QPointF(2, 2))
+        polygon.append(self.destPoint + QtCore.QPointF(2, 2))
+        polygon.append(self.destPoint - QtCore.QPointF(2, 2))
+        polygon.append(self.sourcePoint - QtCore.QPointF(2, 2))
+        path.addPolygon(polygon);
+        return path;
+
     def paint(self, painter: QtGui.QPainter, option, widget):
         super().paint(painter, option, widget)
 
@@ -196,7 +218,7 @@ class CorrespondenceItem(BaseItem):
 
 
 class ImagePairEditor(QtGui.QGraphicsView):
-    def __init__(self, parent, image1, image2, correspondences: List[Correspondence] = []):
+    def __init__(self, parent, image1: str, image2: str, correspondences: List[Correspondence] = []):
         super().__init__(parent)
         self._zoom = 0
 
@@ -210,15 +232,19 @@ class ImagePairEditor(QtGui.QGraphicsView):
         self.setTransformationAnchor(QtGui.QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QtGui.QGraphicsView.AnchorViewCenter)
         self.setSizePolicy(QtGui.QSizePolicy.MinimumExpanding, QtGui.QSizePolicy.MinimumExpanding)
-        self.setMinimumSize(QtCore.QSize(640, 480))
+        self.setMinimumSize(QtCore.QSize(1024, 768))
 
         scene = QtGui.QGraphicsScene(self)
         scene.setItemIndexMethod(QtGui.QGraphicsScene.NoIndex)
-        scene.selectionChanged.connect(self.selectionChanged)
         self.setScene(scene)
 
         self._image1 = scene.addPixmap(QtGui.QPixmap())
         self._image2 = scene.addPixmap(QtGui.QPixmap())
+
+        #Also open the images in OpenCV format, since converting between Mat and QImage is not trivial.
+        # TODO: find a better way.
+        self._image1_cv = cv2.imread(image1)
+        self._image2_cv = cv2.imread(image2)
 
         self.setImages(image1, image2)
 
@@ -260,8 +286,8 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
         self._zoom = 0
         self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
-        self._image1.setPixmap(image1)
-        self._image2.setPixmap(image2)
+        self._image1.setPixmap(QtGui.QPixmap(image1))
+        self._image2.setPixmap(QtGui.QPixmap(image2))
         self.fitInView()
 
     def zoomFactor(self):
@@ -316,10 +342,76 @@ class ImagePairEditor(QtGui.QGraphicsView):
                 self._insert_dst = None
                 self.stopInsertion()
 
-    def selectionChanged(self):
-        print("Selection changed")
+    def contextMenuEvent(self, event):
+        item = self.itemAt(event.pos());
+        menu = QtGui.QMenu(self)
 
-        print(self.scene().selectedItems())
+        deleteAction = QtGui.QAction("Delete this item", self)
+        if type(item) in [PointItem, CorrespondenceItem]:
+            menu.addAction(deleteAction)
+
+        deleteAllItemsAction = QtGui.QAction("Delete all items", self)
+        menu.addAction(deleteAllItemsAction)
+
+        autoFillAction = QtGui.QAction("Autodetect matches", self)
+        if item in [self._image1, self._image2]:
+            menu.addAction(autoFillAction)
+
+
+        action = menu.exec_(self.mapToGlobal(event.pos()))
+        if action == deleteAction:
+            self.deleteItem(item)
+        elif action == deleteAllItemsAction:
+            msg = QtGui.QMessageBox()
+            msg.setIcon(QtGui.QMessageBox.Warning)
+
+            msg.setText("Are you sure you want to delete all correspondences?\nThis cannot be undone.")
+            msg.setWindowTitle("Confirm deletion")
+            msg.setStandardButtons(QtGui.QMessageBox.Yes | QtGui.QMessageBox.Cancel)
+
+            retval = msg.exec_()
+            if retval == QtGui.QMessageBox.Yes:
+                self.deleteAllItems()
+        elif action == autoFillAction:
+            img1 = scale_down_image(self._image1_cv)
+            img2 = scale_down_image(self._image2_cv)
+
+            img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+            img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+            corrFinder = CorrespondenceFinder(DoubleORBMatcher())
+            correspondences = corrFinder.find_correspondences(img1, img2)
+
+            for corr in correspondences:
+                self.addCorrespondence(corr)
+
+
+    # def selectionChanged(self):
+    #     print("Selection changed")
+    #
+    #     print(self.scene().selectedItems())
+
+    #Deletes an item and the ones attached to it; if the item was removed already, don't do anything
+    def deleteItem(self, item):
+        to_remove = []
+        if type(item) == PointItem:
+            # Also add the CorrespondenceItem and the other PointItem
+            item = item.getCorrespondenceItem()
+
+        if type(item) == CorrespondenceItem:
+            to_remove.append(item)
+            to_remove.append(item.getSourceNode())
+            to_remove.append(item.getDestinationNode())
+
+        scene = self.scene()
+        for item in to_remove:
+            scene.removeItem(item)
+
+    def deleteAllItems(self):
+        scene = self.scene()
+        for item in scene.items():
+            if isinstance(item, BaseItem):
+                scene.removeItem(item)
 
     def keyPressEvent(self, event):
         if self._is_inserting:
@@ -328,22 +420,10 @@ class ImagePairEditor(QtGui.QGraphicsView):
         else:
             #Cancel or backspace deletes all selected items
             if event.key() in [Qt.Key_Delete, Qt.Key_Backspace]:
-                to_remove = set() #list of Items to remove
-
-                scene = self.scene()
-                for item in scene.selectedItems():
-                    if type(item) == PointItem:
-                        #Also add the CorrespondenceItem and the other PointItem
-                        item = item.getCorrespondenceItem()
-
-                    if type(item) == CorrespondenceItem:
-                        to_remove.add(item)
-                        to_remove.add(item.getSourceNode())
-                        to_remove.add(item.getDestinationNode())
+                for item in self.scene().selectedItems():
+                    self.deleteItem(item)
 
 
-                for item in to_remove:
-                    scene.removeItem(item)
 
         if event.key() != Qt.Key_Escape: # prevent dialog from closing on escape
             super().keyPressEvent(event)
@@ -380,7 +460,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
 
 class ImagePairEditorDialog(QtGui.QDialog):
-    def __init__(self, image1, image2, correspondences: List[Correspondence] = [], parent = None):
+    def __init__(self, image1: str, image2: str, correspondences: List[Correspondence] = [], parent = None):
         super().__init__(parent)
 
         self.editor = ImagePairEditor(self, image1, image2, correspondences)
@@ -437,8 +517,8 @@ if __name__ == '__main__':
     correspondences = []
 
     #Some fake data
-    #for path in ['/path/image1.jpg', '/path/image2.jpg']:
-    #    images.append(QtGui.QPixmap(path))
+    #for path in ['/home/spider/arclimb/ale1.jpg', '/home/spider/arclimb/ale2.jpg']:
+    #    images.append(path)
     #correspondences = [Correspondence(Point(random.random(), random.random()), Point(random.random(), random.random())) for _ in range(4)]
 
     while True:
@@ -446,7 +526,10 @@ if __name__ == '__main__':
             break
         path = QtGui.QFileDialog.getOpenFileName(None, 'Choose an image')
         if path:
-            images.append(QtGui.QPixmap(path))
+            images.append(path)
+        else:
+            sys.exit()
+
 
     corr, accepted = ImagePairEditorDialog.run(images[0], images[1], correspondences)
     print(corr)
