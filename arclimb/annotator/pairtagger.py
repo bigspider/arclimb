@@ -25,8 +25,10 @@ def _pointToAbsoluteCoordinates(pt: Union[Point, QtCore.QPointF], rect: QtCore.Q
 
 
 class BaseItem(QtGui.QGraphicsItem):
-    def __init__(self):
+    def __init__(self, imagePairEditor):
         super().__init__()
+
+        self.imagePairEditor = imagePairEditor
 
     def getModel(self):
         raise NotImplemented("Subclasses of BaseItem should override getModel")
@@ -48,9 +50,8 @@ class PointItem(BaseItem):
         return PointItem.TYPE
 
     def __init__(self, imagePairEditor: 'ImagePairEditor', model: Point, boundTo: QtGui.QGraphicsItem):
-        super().__init__()
+        super().__init__(imagePairEditor)
 
-        self.imagePairEditor = imagePairEditor
         self.correspondenceItem = None
 
         self.boundToImg = boundTo
@@ -141,8 +142,8 @@ class CorrespondenceItem(BaseItem):
 
     TYPE = QtGui.QGraphicsItem.UserType + 2
 
-    def __init__(self, sourceNode: PointItem, destNode: PointItem):
-        super().__init__()
+    def __init__(self, imagePairEditor, sourceNode: PointItem, destNode: PointItem):
+        super().__init__(imagePairEditor)
 
         self.sourcePoint = QtCore.QPointF()
         self.destPoint = QtCore.QPointF()
@@ -215,7 +216,6 @@ class CorrespondenceItem(BaseItem):
 
         line = QtCore.QLineF(self.sourcePoint, self.destPoint)
         painter.drawLine(line)
-
 
 class ImagePairEditor(QtGui.QGraphicsView):
     def __init__(self, parent, image1: str, image2: str, correspondences: List[Correspondence] = []):
@@ -337,7 +337,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
             #If both nodes are inserted, we add the edge and we are done
             if self._insert_src is not None and self._insert_dst is not None:
-                self.scene().addItem(CorrespondenceItem(self._insert_src, self._insert_dst))
+                self.scene().addItem(CorrespondenceItem(self, self._insert_src, self._insert_dst))
                 self._insert_src = None
                 self._insert_dst = None
                 self.stopInsertion()
