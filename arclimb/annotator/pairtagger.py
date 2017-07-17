@@ -3,7 +3,7 @@ from PyQt4.QtCore import Qt, pyqtSignal
 
 from arclimb.core import Point, Correspondence
 
-from typing import List, Union, Any, NewType
+from typing import List, Union, Any, NewType, Callable
 
 import cv2
 
@@ -36,9 +36,14 @@ class BaseItem(QtGui.QGraphicsItem):
     def paint(self, painter, option, widget):
         painter.setPen(QtGui.QColor('yellow'))
 
+    #Returns a list of other items that should be deleted if this item is deleted.
+    def getConnectedItems(self):
+        return []
+
+
 class PointItem(BaseItem):
     """
-    GraphicsItem representing one end of a correspondence.
+    QGraphicsItem representing one end of a correspondence.
     Except when the user is adding a new correspondence, each Node must be associated with exactly one Correspondence.
 
     """
@@ -98,6 +103,16 @@ class PointItem(BaseItem):
         painter.setPen(pen)
         painter.drawEllipse(self.boundingRect())
 
+    # Returns the other endpoint of the associated CorrespondenceItem
+    def getOtherEndpoint(self):
+        src = self.correspondenceItem.getSourceNode()
+        dst = self.correspondenceItem.getDestinationNode()
+        return src if src != self else dst
+
+    #If this item is removed, the CorrespondenceItem and its other endpoint should be removed
+    def getConnectedItems(self):
+        return [self.getCorrespondenceItem(), self.getOtherEndpoint()]
+
     def setCorrespondenceItem(self, corr: 'CorrespondenceItem'):
         self.correspondenceItem = corr
         corr.adjust()
@@ -137,7 +152,7 @@ class PointItem(BaseItem):
 
 class CorrespondenceItem(BaseItem):
     """
-    GraphicsItem representing a correspondence. Each Correspondence is associated with two Nodes.
+    QGraphicsItem representing a correspondence. Each Correspondence is associated with two Nodes.
     """
 
     TYPE = QtGui.QGraphicsItem.UserType + 2
@@ -165,6 +180,10 @@ class CorrespondenceItem(BaseItem):
 
     def getDestinationNode(self) -> PointItem:
         return self.destinationNode
+
+    # If this item is removed, the two endpoints should be removed
+    def getConnectedItems(self):
+        return [self.getSourceNode(), self.getDestinationNode()]
 
     def type(self):
         return CorrespondenceItem.TYPE
@@ -217,6 +236,77 @@ class CorrespondenceItem(BaseItem):
         line = QtCore.QLineF(self.sourcePoint, self.destPoint)
         painter.drawLine(line)
 
+class KeypointItem(BaseItem):
+    """
+    QGraphicsItem representing a KeyPoint. The GUI allows to replace a pair of KeyPointItems with a PointItem for convenience.
+    """
+
+    TYPE = QtGui.QGraphicsItem.UserType + 3
+    RADIUS = 4
+
+    def type(self):
+        return KeypointItem.TYPE
+
+    def __init__(self, imagePairEditor: 'ImagePairEditor', position: Point, boundTo: QtGui.QGraphicsItem):
+        super().__init__(imagePairEditor)
+
+        self.correspondenceItem = None
+
+        self.position = position
+
+        self.boundToImg = boundTo
+
+        p = _pointToAbsoluteCoordinates(position, boundTo.sceneBoundingRect())
+        self.setPos(p.x, p.y)
+
+        self.setCursor(Qt.PointingHandCursor)
+
+        self.setFlag(QtGui.QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QtGui.QGraphicsItem.ItemSendsGeometryChanges)
+        self.setFlag(QtGui.QGraphicsItem.ItemIgnoresTransformations)
+        self.setCacheMode(QtGui.QGraphicsItem.DeviceCoordinateCache)
+        self.setZValue(1)
+
+    def getModel(self):
+        return None
+
+    def boundingRect(self):
+        r = PointItem.RADIUS
+        return QtCore.QRectF(-r, -r, 2 * r, 2 * r)
+
+    def shape(self):
+        path = QtGui.QPainterPath()
+        path.addEllipse(self.boundingRect());
+        return path;
+
+    def paint(self, painter, option, widget=None):
+        super().paint(painter, option, widget)
+
+        #painter.setPen(QtGui.QColor('green'))
+
+        pen = painter.pen()
+        pen.setCosmetic(True)
+
+        if self.isSelected():
+            pen.setWidth(2)
+
+        painter.setPen(pen)
+        painter.drawEllipse(self.boundingRect())
+
+    def itemChange(self, change, value):
+        #TODO: do we need this?
+        return super().itemChange(change, value)
+
+    def mousePressEvent(self, event):
+        self.update()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.update()
+        super().mouseReleaseEvent(event)
+
+
+
 class ImagePairEditor(QtGui.QGraphicsView):
     def __init__(self, parent, image1: str, image2: str, correspondences: List[Correspondence] = []):
         super().__init__(parent)
@@ -254,6 +344,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
         self.fitInView()
 
     def addCorrespondence(self, corr: Correspondence):
+        assert corr is not None
         scene = self.scene()
         node1 = PointItem(self, model=corr.point1, boundTo=self._image1)
         node2 = PointItem(self, model=corr.point2, boundTo=self._image2)
@@ -319,8 +410,14 @@ class ImagePairEditor(QtGui.QGraphicsView):
             return
 
         image_rect = clicked_image.sceneBoundingRect()
-        scenePos = self.mapToScene(event.pos())
-        pt = _pointToRelativeCoordinates(scenePos, image_rect)
+        clickScenePos = self.mapToScene(event.pos())
+
+        keypoint_items = [x for x in items if isinstance(x, KeypointItem)]
+        if len(keypoint_items) > 0:
+            # Adjust the coordinates of the click to the coordinates of the first overlapping KeypointItem
+            clickScenePos = keypoint_items[0].pos()
+
+        pt = _pointToRelativeCoordinates(clickScenePos, image_rect)
 
         if self._is_inserting:
             if ((self._insert_src is not None and clicked_image == self._image1) or
@@ -357,6 +454,13 @@ class ImagePairEditor(QtGui.QGraphicsView):
         if item in [self._image1, self._image2]:
             menu.addAction(autoFillAction)
 
+        showAllKeypointsAction = QtGui.QAction("Show all keypoints", self)
+        removeKeypointAction = QtGui.QAction("Remove this keypoint", self)
+        removeAllKeypointsAction = QtGui.QAction("Remove all keypoints", self)
+        menu.addAction(showAllKeypointsAction)
+        if type(item) == KeypointItem:
+            menu.addAction(removeKeypointAction)
+        menu.addAction(removeAllKeypointsAction)
 
         action = menu.exec_(self.mapToGlobal(event.pos()))
         if action == deleteAction:
@@ -384,34 +488,60 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
             for corr in correspondences:
                 self.addCorrespondence(corr)
+        elif action == showAllKeypointsAction:
 
+            nfeatures, ok = QtGui.QInputDialog.getInt(self, "Choose the number of keypoints.", "SIFT keypoints",
+                                      value=250, min=10, max=5000, step=50)
 
-    # def selectionChanged(self):
-    #     print("Selection changed")
-    #
-    #     print(self.scene().selectedItems())
+            if not ok:
+                return
+
+            #Delete any existing keypoint
+            self.deleteAllItems(lambda x: type(x) == KeypointItem)
+
+            img1 = scale_down_image(self._image1_cv)
+            img2 = scale_down_image(self._image2_cv)
+
+            # detect and add keypoints
+            img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+            img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+            sift = cv2.xfeatures2d.SIFT_create(nfeatures=nfeatures)
+            kp1, _ = sift.detectAndCompute(img1, None)
+            kp2, _ = sift.detectAndCompute(img2, None)
+
+            scene = self.scene()
+            h1, w1, *_ = img1.shape
+            for kp in kp1:
+                pt = kp.pt
+                scene.addItem(KeypointItem(self, position=Point(pt[0]/w1, pt[1]/h1), boundTo=self._image1))
+
+            h2, w2, *_ = img2.shape
+            for kp in kp2:
+                pt = kp.pt
+                scene.addItem(KeypointItem(self, position=Point(pt[0]/w2, pt[1]/h2), boundTo=self._image2))
+
+        elif action == removeKeypointAction:
+            self.deleteItem(item)
+
+        elif action == removeAllKeypointsAction:
+            self.deleteAllItems(lambda x : type(x) == KeypointItem)
 
     #Deletes an item and the ones attached to it; if the item was removed already, don't do anything
     def deleteItem(self, item):
-        to_remove = []
-        if type(item) == PointItem:
-            # Also add the CorrespondenceItem and the other PointItem
-            item = item.getCorrespondenceItem()
-
-        if type(item) == CorrespondenceItem:
-            to_remove.append(item)
-            to_remove.append(item.getSourceNode())
-            to_remove.append(item.getDestinationNode())
+        to_remove = item.getConnectedItems()
+        to_remove.append(item)
 
         scene = self.scene()
         for item in to_remove:
             scene.removeItem(item)
 
-    def deleteAllItems(self):
+    def deleteAllItems(self, condition: Callable[[BaseItem], bool] = None):
         scene = self.scene()
         for item in scene.items():
             if isinstance(item, BaseItem):
-                scene.removeItem(item)
+                if condition is None or condition(item) == True:
+                    scene.removeItem(item)
 
     def keyPressEvent(self, event):
         if self._is_inserting:
@@ -423,11 +553,8 @@ class ImagePairEditor(QtGui.QGraphicsView):
                 for item in self.scene().selectedItems():
                     self.deleteItem(item)
 
-
-
         if event.key() != Qt.Key_Escape: # prevent dialog from closing on escape
             super().keyPressEvent(event)
-
 
     def startInsertion(self):
         if self._is_inserting:
