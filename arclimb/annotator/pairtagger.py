@@ -25,8 +25,10 @@ def _pointToAbsoluteCoordinates(pt: Union[Point, QtCore.QPointF], rect: QtCore.Q
 
 
 class BaseItem(QtGui.QGraphicsItem):
-    def __init__(self):
+    def __init__(self, imagePairEditor):
         super().__init__()
+
+        self.imagePairEditor = imagePairEditor
 
     def getModel(self):
         raise NotImplemented("Subclasses of BaseItem should override getModel")
@@ -48,9 +50,8 @@ class PointItem(BaseItem):
         return PointItem.TYPE
 
     def __init__(self, imagePairEditor: 'ImagePairEditor', model: Point, boundTo: QtGui.QGraphicsItem):
-        super().__init__()
+        super().__init__(imagePairEditor)
 
-        self.imagePairEditor = imagePairEditor
         self.correspondenceItem = None
 
         self.boundToImg = boundTo
@@ -141,8 +142,8 @@ class CorrespondenceItem(BaseItem):
 
     TYPE = QtGui.QGraphicsItem.UserType + 2
 
-    def __init__(self, sourceNode: PointItem, destNode: PointItem):
-        super().__init__()
+    def __init__(self, imagePairEditor, sourceNode: PointItem, destNode: PointItem):
+        super().__init__(imagePairEditor)
 
         self.sourcePoint = QtCore.QPointF()
         self.destPoint = QtCore.QPointF()
@@ -216,7 +217,6 @@ class CorrespondenceItem(BaseItem):
         line = QtCore.QLineF(self.sourcePoint, self.destPoint)
         painter.drawLine(line)
 
-
 class ImagePairEditor(QtGui.QGraphicsView):
     def __init__(self, parent, image1: str, image2: str, correspondences: List[Correspondence] = []):
         super().__init__(parent)
@@ -259,7 +259,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
         node2 = PointItem(self, model=corr.point2, boundTo=self._image2)
         scene.addItem(node1)
         scene.addItem(node2)
-        scene.addItem(CorrespondenceItem(node1, node2))
+        scene.addItem(CorrespondenceItem(self, node1, node2))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -337,7 +337,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
             #If both nodes are inserted, we add the edge and we are done
             if self._insert_src is not None and self._insert_dst is not None:
-                self.scene().addItem(CorrespondenceItem(self._insert_src, self._insert_dst))
+                self.scene().addItem(CorrespondenceItem(self, self._insert_src, self._insert_dst))
                 self._insert_src = None
                 self._insert_dst = None
                 self.stopInsertion()
@@ -513,23 +513,21 @@ if __name__ == '__main__':
 
     app = QtGui.QApplication(sys.argv)
 
-    images = []
+    image_paths = []
     correspondences = []
 
-    #Some fake data
-    #for path in ['/home/spider/arclimb/ale1.jpg', '/home/spider/arclimb/ale2.jpg']:
-    #    images.append(path)
-    #correspondences = [Correspondence(Point(random.random(), random.random()), Point(random.random(), random.random())) for _ in range(4)]
-
-    while True:
-        if len(images) >= 2:
-            break
-        path = QtGui.QFileDialog.getOpenFileName(None, 'Choose an image')
-        if path:
-            images.append(path)
-        else:
-            sys.exit()
+    if len(sys.argv) >= 3:
+        image_paths = sys.argv[1:3]
+    else:
+        while True:
+            if len(image_paths) >= 2:
+                break
+            path = QtGui.QFileDialog.getOpenFileName(None, 'Choose an image')
+            if path:
+                image_paths.append(path)
+            else:
+                sys.exit()
 
 
-    corr, accepted = ImagePairEditorDialog.run(images[0], images[1], correspondences)
+    corr, accepted = ImagePairEditorDialog.run(image_paths[0], image_paths[1], correspondences)
     print(corr)
