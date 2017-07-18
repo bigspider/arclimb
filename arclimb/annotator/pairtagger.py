@@ -7,6 +7,8 @@ from typing import List, Union, Any, NewType, Callable
 
 import cv2
 
+import numpy as np
+
 from core.correspondence import DoubleORBMatcher, CorrespondenceFinder
 from core.utils.image import scale_down_image
 
@@ -456,6 +458,17 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos());
+
+        items_at_pos = self.items(event.pos())
+        if self._image1 in items_at_pos:
+            clicked_image = self._image1
+            clicked_image_cv = self._image1_cv
+        elif self._image2 in items_at_pos:
+            clicked_image = self._image2
+            clicked_image_cv = self._image2_cv
+        else:
+            return # No context menu for clicks outside the image
+
         menu = QtGui.QMenu(self)
 
         deleteAction = QtGui.QAction("Delete this item", self)
@@ -469,10 +482,12 @@ class ImagePairEditor(QtGui.QGraphicsView):
         if item in [self._image1, self._image2]:
             menu.addAction(autoFillAction)
 
-        showAllKeypointsAction = QtGui.QAction("Show all keypoints", self)
+        computeAllKeypointsAction = QtGui.QAction("Compute all keypoints", self)
+        computeKeypointsAroundHereAction = QtGui.QAction("Compute keypoints around here", self)
         removeKeypointAction = QtGui.QAction("Remove this keypoint", self)
         removeAllKeypointsAction = QtGui.QAction("Remove all keypoints", self)
-        menu.addAction(showAllKeypointsAction)
+        menu.addAction(computeAllKeypointsAction)
+        menu.addAction(computeKeypointsAroundHereAction)
         if isinstance(item, KeypointItem):
             menu.addAction(removeKeypointAction)
         menu.addAction(removeAllKeypointsAction)
@@ -503,9 +518,8 @@ class ImagePairEditor(QtGui.QGraphicsView):
 
             for corr in correspondences:
                 self.addCorrespondence(corr)
-        elif action == showAllKeypointsAction:
-
-            nfeatures, ok = QtGui.QInputDialog.getInt(self, "Choose the number of keypoints.", "SIFT keypoints",
+        elif action == computeAllKeypointsAction:
+            n_features, ok = QtGui.QInputDialog.getInt(self, "Choose the number of keypoints.", "SIFT keypoints",
                                       value=250, min=10, max=5000, step=50)
 
             if not ok:
@@ -517,11 +531,10 @@ class ImagePairEditor(QtGui.QGraphicsView):
             img1 = scale_down_image(self._image1_cv)
             img2 = scale_down_image(self._image2_cv)
 
-            # detect and add keypoints
             img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
             img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
-            sift = cv2.xfeatures2d.SIFT_create(nfeatures=nfeatures)
+            sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features)
             kp1, _ = sift.detectAndCompute(img1, None)
             kp2, _ = sift.detectAndCompute(img2, None)
 
@@ -535,6 +548,38 @@ class ImagePairEditor(QtGui.QGraphicsView):
             for kp in kp2:
                 pt = kp.pt
                 scene.addItem(KeypointItem(self, position=Point(pt[0]/w2, pt[1]/h2), boundTo=self._image2))
+
+        elif action == computeKeypointsAroundHereAction:
+            n_features, ok = QtGui.QInputDialog.getInt(self, "Choose the number of keypoints.", "SIFT keypoints",
+                                      value=500, min=10, max=5000, step=50)
+
+            if not ok:
+                return
+
+            image_rect = clicked_image.sceneBoundingRect()
+            clickScenePos = self.mapToScene(event.pos())
+
+            pt = _pointToRelativeCoordinates(clickScenePos, image_rect)
+
+            img = scale_down_image(clicked_image_cv)
+
+            sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features)
+
+            h, w, *_ = img.shape
+            radius = min(w, h)/10
+            x_0, y_0 = pt.x * w, pt.y* h # coordinates of the click
+
+            #Only show keypoints around the click (radius roughly 1/10 of the image)
+            mask = np.zeros([h, w], np.uint8)
+            y, x = np.ogrid[0:h, 0:w]
+            mask[(x - x_0)**2 + (y - y_0)**2 <= radius**2] = 255
+
+            keypoints, _ = sift.detectAndCompute(img, mask)
+
+            scene = self.scene()
+            for kp in keypoints:
+                pt = kp.pt
+                scene.addItem(KeypointItem(self, position=Point(pt[0]/w, pt[1]/h), boundTo=clicked_image))
 
         elif action == removeKeypointAction:
             self.deleteItem(item)
@@ -629,7 +674,6 @@ class ImagePairEditorDialog(QtGui.QDialog):
 
         buttons = QtGui.QHBoxLayout()
         self.modeButtonGroup = QtGui.QButtonGroup(self)
-
 
         self.selectButton = QtGui.QPushButton("Select")
         self.selectButton.setCheckable(True)
