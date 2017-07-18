@@ -306,13 +306,17 @@ class KeypointItem(BaseItem):
         super().mouseReleaseEvent(event)
 
 
-
 class ImagePairEditor(QtGui.QGraphicsView):
+    MODE_SELECT = 1
+    MODE_INSERT = 2
+    MODE_DELETE = 3
+
+    modeChanged = pyqtSignal(int) # Emitted when mode changes
+
     def __init__(self, parent, image1: str, image2: str, correspondences: List[Correspondence] = []):
         super().__init__(parent)
         self._zoom = 0
 
-        self._is_inserting = False
         self._insert_src = None
         self._insert_dst = None
 
@@ -327,6 +331,9 @@ class ImagePairEditor(QtGui.QGraphicsView):
         scene = QtGui.QGraphicsScene(self)
         scene.setItemIndexMethod(QtGui.QGraphicsScene.NoIndex)
         self.setScene(scene)
+
+        self._currentMode = None
+        self.setMode(ImagePairEditor.MODE_SELECT)
 
         self._image1 = scene.addPixmap(QtGui.QPixmap())
         self._image2 = scene.addPixmap(QtGui.QPixmap())
@@ -356,10 +363,6 @@ class ImagePairEditor(QtGui.QGraphicsView):
         super().showEvent(event)
 
         self.fitInView()
-
-    def itemMoved(self):
-        pass
-        #TODO: do we need this?
 
     def fitInView(self):
         rect1 = QtCore.QRectF(self._image1.pixmap().rect())
@@ -401,6 +404,10 @@ class ImagePairEditor(QtGui.QGraphicsView):
     def mousePressEvent(self, event: QtGui.QMouseEvent):
         super().mousePressEvent(event)
 
+        # We only handle left clicks
+        if event.button() != Qt.LeftButton:
+            return
+
         items = self.items(event.pos())
         if self._image1 in items:
             clicked_image = self._image1
@@ -409,17 +416,20 @@ class ImagePairEditor(QtGui.QGraphicsView):
         else:
             return
 
+        # Only keep the BaseItems
+        items = [item for item in items if isinstance(item, BaseItem)]
+
         image_rect = clicked_image.sceneBoundingRect()
         clickScenePos = self.mapToScene(event.pos())
 
-        keypoint_items = [x for x in items if isinstance(x, KeypointItem)]
-        if len(keypoint_items) > 0:
-            # Adjust the coordinates of the click to the coordinates of the first overlapping KeypointItem
-            clickScenePos = keypoint_items[0].pos()
+        keypointItems = [x for x in items if isinstance(x, KeypointItem)]
+        if len(keypointItems) > 0:
+            # If a keypoint was clicked, adjust the coordinates of the click to its coordinates
+            clickScenePos = keypointItems[0].pos()
 
         pt = _pointToRelativeCoordinates(clickScenePos, image_rect)
 
-        if self._is_inserting:
+        if self.getMode() == ImagePairEditor.MODE_INSERT:
             if ((self._insert_src is not None and clicked_image == self._image1) or
                     (self._insert_dst is not None and clicked_image == self._image2)):
                 return   # The node on this image was already inserted
@@ -432,12 +442,17 @@ class ImagePairEditor(QtGui.QGraphicsView):
             else:
                 self._insert_dst = newNode
 
-            #If both nodes are inserted, we add the edge and we are done
+            # If both nodes are inserted, we add the edge and we are done
             if self._insert_src is not None and self._insert_dst is not None:
                 self.scene().addItem(CorrespondenceItem(self, self._insert_src, self._insert_dst))
                 self._insert_src = None
                 self._insert_dst = None
-                self.stopInsertion()
+        elif self.getMode() == ImagePairEditor.MODE_DELETE:
+            # Delete all items overlapping with the cursor
+            # TODO: implement stronger deletion tool (e.g.: delete all items in region around the cursor)
+            for item in items:
+                self.deleteItem(item) # FIXME: this sometimes deletes an element twice, which upsets Qt
+
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos());
@@ -528,7 +543,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
             self.deleteAllItems(lambda x : type(x) == KeypointItem)
 
     #Deletes an item and the ones attached to it; if the item was removed already, don't do anything
-    def deleteItem(self, item):
+    def deleteItem(self, item: BaseItem):
         to_remove = item.getConnectedItems()
         to_remove.append(item)
 
@@ -544,43 +559,60 @@ class ImagePairEditor(QtGui.QGraphicsView):
                     scene.removeItem(item)
 
     def keyPressEvent(self, event):
-        if self._is_inserting:
+        # If not in selection mode, Esc aborts and goes back to selection mode
+        if self.getMode() != ImagePairEditor.MODE_SELECT:
             if event.key() == Qt.Key_Escape:
-                self.stopInsertion()
+                self.setMode(ImagePairEditor.MODE_SELECT)
         else:
-            #Cancel or backspace deletes all selected items
+            # Selection mode
+            # Cancel or backspace deletes all selected items
             if event.key() in [Qt.Key_Delete, Qt.Key_Backspace]:
                 for item in self.scene().selectedItems():
                     self.deleteItem(item)
 
-        if event.key() != Qt.Key_Escape: # prevent dialog from closing on escape
+        # Prevent dialog from closing on escape
+        if event.key() != Qt.Key_Escape:
             super().keyPressEvent(event)
 
-    def startInsertion(self):
-        if self._is_inserting:
+    def setMode(self, mode):
+        if self._currentMode == mode:
             return
 
-        self._is_inserting = True
+        # Get out of current mode
+        if self._currentMode == ImagePairEditor.MODE_SELECT:
+            # Nothing to do here
+            pass
+        elif self._currentMode == ImagePairEditor.MODE_INSERT:
+            if self._insert_src is not None:
+                self.scene().removeItem(self._insert_src)
+                self._insert_src = None
+            if self._insert_dst is not None:
+                self.scene().removeItem(self._insert_dst)
+                self._insert_dst = None
 
-        self.setDragMode(QtGui.QGraphicsView.NoDrag)
-        self.viewport().setCursor(Qt.CrossCursor)
+                # TODO: scene items should be transparent to mouse events during insertion (and not draggable)
+        elif self._currentMode == ImagePairEditor.MODE_DELETE:
+            # TODO
+            pass
 
-        #TODO: scene items should be transparent to mouse events during insertion (and not draggable)
+        # Set up the new mode
+        self._currentMode = mode
+        if mode == ImagePairEditor.MODE_SELECT:
+            self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
+        elif mode == ImagePairEditor.MODE_INSERT:
+            self.setDragMode(QtGui.QGraphicsView.NoDrag)
+            self.viewport().setCursor(Qt.CrossCursor)
+        elif mode == ImagePairEditor.MODE_DELETE:
+            # TODO
+            self.setDragMode(QtGui.QGraphicsView.NoDrag)
+            self.viewport().setCursor(Qt.ForbiddenCursor) # TODO: better custom cursor, maybe
+            pass
 
-    def stopInsertion(self):
-        if not self._is_inserting:
-            return
+        self.modeChanged.emit(mode)
 
-        if self._insert_src is not None:
-            self.scene().removeItem(self._insert_src)
-            self._insert_src = None
-        if self._insert_dst is not None:
-            self.scene().removeItem(self._insert_dst)
-            self._insert_dst = None
 
-        self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
-
-        self._is_inserting = False
+    def getMode(self):
+        return self._currentMode
 
     def getCorrespondences(self) -> List[Correspondence]:
         return [item.getModel() for item in self.scene().items() if type(item) == CorrespondenceItem]
@@ -596,16 +628,37 @@ class ImagePairEditorDialog(QtGui.QDialog):
         layout.addWidget(self.editor)
 
         buttons = QtGui.QHBoxLayout()
+        self.modeButtonGroup = QtGui.QButtonGroup(self)
 
-        insertButton = QtGui.QPushButton("Insert")
-        insertButton.clicked.connect(self.insertButtonClicked)
+
+        self.selectButton = QtGui.QPushButton("Select")
+        self.selectButton.setCheckable(True)
+        self.selectButton.setChecked(True)
+        #self.selectButton.clicked.connect(self.selectButtonClicked)
+
+        self.insertButton = QtGui.QPushButton("Insert")
+        self.insertButton.setCheckable(True)
+        #self.insertButton.clicked.connect(self.insertButtonClicked)
+
+        self.deleteButton = QtGui.QPushButton("Delete")
+        self.deleteButton.setCheckable(True)
+
+        self.modeButtonGroup.addButton(self.selectButton, ImagePairEditor.MODE_SELECT)
+        self.modeButtonGroup.addButton(self.insertButton, ImagePairEditor.MODE_INSERT)
+        self.modeButtonGroup.addButton(self.deleteButton, ImagePairEditor.MODE_DELETE)
+        # We use the mode as button id
+        self.modeButtonGroup.buttonClicked[int].connect(lambda id: self.editor.setMode(id))
+        self.editor.modeChanged.connect(self.modeChanged)
+
 
         okButton = QtGui.QPushButton("OK")
         okButton.clicked.connect(self.okButtonClicked)
         cancelButton = QtGui.QPushButton("Cancel")
         cancelButton.clicked.connect(self.cancelButtonClicked)
 
-        buttons.addWidget(insertButton)
+        buttons.addWidget(self.selectButton)
+        buttons.addWidget(self.insertButton)
+        buttons.addWidget(self.deleteButton)
         buttons.addStretch(1)
         buttons.addWidget(okButton)
         buttons.addWidget(cancelButton)
@@ -613,8 +666,9 @@ class ImagePairEditorDialog(QtGui.QDialog):
 
         self.setLayout(layout)
 
-    def insertButtonClicked(self):
-        self.editor.startInsertion()
+    def modeChanged(self, mode):
+        for btn in self.modeButtonGroup.buttons():
+            btn.setChecked(self.modeButtonGroup.id(btn) == mode)
 
     def okButtonClicked(self):
         self.accept()
@@ -624,6 +678,10 @@ class ImagePairEditorDialog(QtGui.QDialog):
 
     def getCorrespondences(self):
         return self.editor.getCorrespondences()
+
+    def keyPressEvent(self, event):
+        # Let the editor handle all keypress events
+        self.editor.keyPressEvent(event)
 
     # static method to create the dialog. Returns (accepted, [list of correspondences]
     @staticmethod
