@@ -11,7 +11,7 @@ from core.correspondence import DoubleORBMatcher, CorrespondenceFinder
 from core.utils.image import scale_down_image
 
 def _pointToRelativeCoordinates(pt: Union[Point, QtCore.QPointF], rect: QtCore.QRectF) -> Point:
-    if type(pt) == QtCore.QPointF:
+    if isinstance(pt, QtCore.QPointF):
         pt = Point(pt.x(), pt.y())
     x = (pt.x - rect.x()) / rect.width()
     y = (pt.y - rect.y()) / rect.height()
@@ -19,7 +19,7 @@ def _pointToRelativeCoordinates(pt: Union[Point, QtCore.QPointF], rect: QtCore.Q
 
 
 def _pointToAbsoluteCoordinates(pt: Union[Point, QtCore.QPointF], rect: QtCore.QRectF) -> Point:
-    if type(pt) == QtCore.QPointF:
+    if isinstance(pt, QtCore.QPointF):
         pt = Point(pt.x(), pt.y())
     return Point(rect.x() + rect.width() * pt.x, rect.y() + rect.height() * pt.y)
 
@@ -459,7 +459,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
         menu = QtGui.QMenu(self)
 
         deleteAction = QtGui.QAction("Delete this item", self)
-        if type(item) in [PointItem, CorrespondenceItem]:
+        if isinstance(item, PointItem) or isinstance(item, CorrespondenceItem):
             menu.addAction(deleteAction)
 
         deleteAllItemsAction = QtGui.QAction("Delete all items", self)
@@ -473,7 +473,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
         removeKeypointAction = QtGui.QAction("Remove this keypoint", self)
         removeAllKeypointsAction = QtGui.QAction("Remove all keypoints", self)
         menu.addAction(showAllKeypointsAction)
-        if type(item) == KeypointItem:
+        if isinstance(item, KeypointItem):
             menu.addAction(removeKeypointAction)
         menu.addAction(removeAllKeypointsAction)
 
@@ -512,7 +512,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
                 return
 
             #Delete any existing keypoint
-            self.deleteAllItems(lambda x: type(x) == KeypointItem)
+            self.deleteAllItems(lambda x: isinstance(x, KeypointItem))
 
             img1 = scale_down_image(self._image1_cv)
             img2 = scale_down_image(self._image2_cv)
@@ -540,7 +540,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
             self.deleteItem(item)
 
         elif action == removeAllKeypointsAction:
-            self.deleteAllItems(lambda x : type(x) == KeypointItem)
+            self.deleteAllItems(lambda x : isinstance(x, KeypointItem))
 
     #Deletes an item and the ones attached to it; if the item was removed already, don't do anything
     def deleteItem(self, item: BaseItem):
@@ -615,7 +615,7 @@ class ImagePairEditor(QtGui.QGraphicsView):
         return self._currentMode
 
     def getCorrespondences(self) -> List[Correspondence]:
-        return [item.getModel() for item in self.scene().items() if type(item) == CorrespondenceItem]
+        return [item.getModel() for item in self.scene().items() if isinstance(item, CorrespondenceItem)]
 
 
 class ImagePairEditorDialog(QtGui.QDialog):
