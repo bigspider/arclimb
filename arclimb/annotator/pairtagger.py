@@ -151,7 +151,6 @@ class PointItem(BaseItem):
         elif change == QGraphicsItem.ItemPositionHasChanged:
             # Signal a change of position to the CorrespondenceItem and the editor
             self.correspondenceItem.adjust()
-            self.imagePairEditor.itemMoved()
             self._updateModel()
         if change == QGraphicsItem.ItemSelectedHasChanged:
             # When a node is selected, also the CorrespondenceItem needs to update
