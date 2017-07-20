@@ -1,41 +1,25 @@
 import networkx as nw
 from typing import NamedTuple, Dict, Set, Any, NewType
-from collections import namedtuple
 
 NodeId = NewType('NodeId', str)
 
-## type hints for variables not supported in Python 3.5
-# class Point(NamedTuple):
-#     x : float
-#     y : float
-#
-#
-# class Correspondence(NamedTuple):
-#     point1: Point
-#     point2: Point
-#
-#
-# class Node(NamedTuple):
-#     id: NodeId
-#     attributes: Dict[str, Any] = {}
-#
-#     def __hash__(self):
-#         return hash(self.id)
+Point = NamedTuple('Point', [
+    ('x', float),
+    ('y', float),
+])
+
+Correspondence = NamedTuple('Correspondence', [
+    ('point1', Point),
+    ('point2', Point),
+])
 
 
-Point = namedtuple('Point', ['x', 'y'])
-
-
-Correspondence = namedtuple('Correspondence', ['point1', 'point2'])
-
-
-Node = namedtuple('Node', ['id', 'attributes'])
-
-
-class Node(namedtuple('Node', ['id', 'attributes'])):
+# Create a node class, and make it have an optional argument
+class Node(NamedTuple('Node', [('id', NodeId), ('attributes', Dict[str, Any])])):
     def __hash__(self):
         return hash(self.id)
 
+Node.__new__.__defaults__ = ({},)
 
 
 class Graph(object):

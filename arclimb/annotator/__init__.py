@@ -1,1 +1,1 @@
-from .pairtagger import ImagePairEditorDialog
+from .pairtagger import ImagePairEditorDialog, run_gui
