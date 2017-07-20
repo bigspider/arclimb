@@ -3,41 +3,40 @@
 import cv2
 import numpy as np
 
-from typing import List, Union, Callable
+from typing import List, Union, Callable, cast, NewType, Optional
 
-# In case PyQt5 isn't loaded, we load things from PyQt4. The big difference is that PyQt5 has broken QtGui into several
-# different classes, so we define them explicitly here.
-try:
-    from PyQt5.QtCore import QPointF, QRectF, QLineF, QSize, QSizeF, Qt, pyqtSignal
-    from PyQt5.QtGui import QPolygonF, QPainterPath, QPainter, QPixmap, QWheelEvent, QMouseEvent, QColor
-    from PyQt5.QtWidgets import QGraphicsItem, QGraphicsView, QSizePolicy, QGraphicsScene, QMenu, QAction, \
-        QMessageBox, QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QButtonGroup, QPushButton, QApplication, \
-        QFileDialog
-
-except ImportError:
-    from PyQt4.QtCore import QPointF, QRectF, QLineF, QSize, QSizeF, Qt, pyqtSignal
-    from PyQt4.QtGui import QGraphicsItem, QGraphicsView, QSizePolicy, QGraphicsScene, QMenu, QAction, QMessageBox, \
-        QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QButtonGroup, QPushButton, QApplication, QFileDialog, \
-        QPolygonF, QPainterPath, QPainter, QPixmap, QWheelEvent, QMouseEvent, QColor
+# TODO(beisner): Decide if we should replace these with 'import *', since  they're getting a bit unruly
+from PyQt5.QtCore import QPointF, QRectF, QLineF, QSize, QSizeF, Qt, pyqtSignal
+from PyQt5.QtGui import QPolygonF, QPainterPath, QPainter, QPixmap, QWheelEvent, QMouseEvent, QColor
+from PyQt5.QtWidgets import QGraphicsItem, QGraphicsView, QSizePolicy, QGraphicsScene, QMenu, QAction, \
+    QMessageBox, QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QButtonGroup, QPushButton, QApplication, \
+    QFileDialog, QStyleOptionGraphicsItem, QWidget
 
 from arclimb.core.correspondence import DoubleORBMatcher, CorrespondenceFinder
 from arclimb.core.utils.image import scale_down_image
 from arclimb.core import Point, Correspondence
 
+PointUnion = NewType('PointUnion', Union[Point, QPointF])
 
-# noinspection PyPep8Naming
-def _pointToRelativeCoordinates(pt: Union[Point, QPointF], rect: QRectF) -> Point:
+
+def __point_union_to_point(pt: PointUnion) -> Point:
     if isinstance(pt, QPointF):
+        pt = cast(QPointF, pt)
         pt = Point(pt.x(), pt.y())
+    else:
+        pt = cast(Point, pt)
+    return pt
+
+
+def _point_to_relative_coordinates(pt: PointUnion, rect: QRectF) -> Point:
+    pt = __point_union_to_point(pt)
     x = (pt.x - rect.x()) / rect.width()
     y = (pt.y - rect.y()) / rect.height()
     return Point(x, y)
 
 
-# noinspection PyPep8Naming
-def _pointToAbsoluteCoordinates(pt: Union[Point, QPointF], rect: QRectF) -> Point:
-    if isinstance(pt, QPointF):
-        pt = Point(pt.x(), pt.y())
+def _point_to_absolute_coordinates(pt: PointUnion, rect: QRectF) -> Point:
+    pt = __point_union_to_point(pt)
     return Point(rect.x() + rect.width() * pt.x, rect.y() + rect.height() * pt.y)
 
 
@@ -51,7 +50,7 @@ class BaseItem(QGraphicsItem):
     def getModel(self):
         raise NotImplemented("Subclasses of BaseItem should override getModel")
 
-    def paint(self, painter, option, widget):
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: Optional[QWidget] = None) -> None:
         painter.setPen(QColor('yellow'))
 
     # Returns a list of other items that should be deleted if this item is deleted.
@@ -96,11 +95,11 @@ class PointItem(BaseItem):
         return self.model
 
     def _setPosFromModel(self, model: Point):
-        p = _pointToAbsoluteCoordinates(model, self.boundToImg.sceneBoundingRect())
+        p = _point_to_absolute_coordinates(model, self.boundToImg.sceneBoundingRect())
         self.setPos(p.x, p.y)
 
     def _updateModel(self):
-        self.model = _pointToRelativeCoordinates(self.pos(), self.boundToImg.sceneBoundingRect())
+        self.model = _point_to_relative_coordinates(self.pos(), self.boundToImg.sceneBoundingRect())
 
     def boundingRect(self):
         r = PointItem.RADIUS
@@ -108,8 +107,8 @@ class PointItem(BaseItem):
 
     def shape(self):
         path = QPainterPath()
-        path.addEllipse(self.boundingRect());
-        return path;
+        path.addEllipse(self.boundingRect())
+        return path
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
@@ -145,9 +144,9 @@ class PointItem(BaseItem):
             rect = self.boundToImg.sceneBoundingRect()
             newPos = value
             if not rect.contains(newPos):
-                newPos.setX(min(rect.right(), max(newPos.x(), rect.left())));
-                newPos.setY(min(rect.bottom(), max(newPos.y(), rect.top())));
-                return newPos;
+                newPos.setX(min(rect.right(), max(newPos.x(), rect.left())))
+                newPos.setY(min(rect.bottom(), max(newPos.y(), rect.top())))
+                return newPos
         elif change == QGraphicsItem.ItemPositionHasChanged:
             # Signal a change of position to the CorrespondenceItem and the editor
             self.correspondenceItem.adjust()
@@ -212,7 +211,6 @@ class CorrespondenceItem(BaseItem):
             return
 
         line = QLineF(self.mapFromItem(self.sourceNode, 0, 0), self.mapFromItem(self.destinationNode, 0, 0))
-        length = line.length()
 
         self.prepareGeometryChange()
 
@@ -225,8 +223,8 @@ class CorrespondenceItem(BaseItem):
             return QRectF()
 
         return QRectF(self.sourcePoint,
-                             QSizeF(self.destPoint.x() - self.sourcePoint.x(),
-                                           self.destPoint.y() - self.sourcePoint.y())).normalized()
+                      QSizeF(self.destPoint.x() - self.sourcePoint.x(),
+                             self.destPoint.y() - self.sourcePoint.y())).normalized()
 
     def shape(self):
         path = QPainterPath()
@@ -237,8 +235,8 @@ class CorrespondenceItem(BaseItem):
         polygon.append(self.destPoint + QPointF(2, 2))
         polygon.append(self.destPoint - QPointF(2, 2))
         polygon.append(self.sourcePoint - QPointF(2, 2))
-        path.addPolygon(polygon);
-        return path;
+        path.addPolygon(polygon)
+        return path
 
     def paint(self, painter: QPainter, option, widget):
         super().paint(painter, option, widget)
@@ -256,10 +254,13 @@ class CorrespondenceItem(BaseItem):
         painter.drawLine(line)
 
         # noinspection PyPep8Naming
+
+
 # noinspection PyPep8Naming
 class KeypointItem(BaseItem):
     """
-    QGraphicsItem representing a KeyPoint. The GUI allows to replace a pair of KeyPointItems with a PointItem for convenience.
+    QGraphicsItem representing a KeyPoint. The GUI allows to replace a pair of KeyPointItems with a PointItem for
+    convenience.
     """
 
     TYPE = QGraphicsItem.UserType + 3
@@ -277,7 +278,7 @@ class KeypointItem(BaseItem):
 
         self.boundToImg = boundTo
 
-        p = _pointToAbsoluteCoordinates(position, boundTo.sceneBoundingRect())
+        p = _point_to_absolute_coordinates(position, boundTo.sceneBoundingRect())
         self.setPos(p.x, p.y)
 
         self.setCursor(Qt.PointingHandCursor)
@@ -297,8 +298,8 @@ class KeypointItem(BaseItem):
 
     def shape(self):
         path = QPainterPath()
-        path.addEllipse(self.boundingRect());
-        return path;
+        path.addEllipse(self.boundingRect())
+        return path
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
@@ -411,12 +412,9 @@ class ImagePairEditor(QGraphicsView):
         return self._zoom
 
     def wheelEvent(self, event: QWheelEvent):
-        # TODO(beisner): When Qt4 support removed, only keep the second one
-        try:
-            delta = event.delta()
-        except AttributeError:
-            delta = event.angleDelta()
-            delta = delta.x() + delta.y()
+        # Unpack delta
+        delta = event.angleDelta()
+        delta = delta.x() + delta.y()
 
         if delta > 0:
             factor = 1.25
@@ -458,7 +456,7 @@ class ImagePairEditor(QGraphicsView):
             # If a keypoint was clicked, adjust the coordinates of the click to its coordinates
             clickScenePos = keypointItems[0].pos()
 
-        pt = _pointToRelativeCoordinates(clickScenePos, image_rect)
+        pt = _point_to_relative_coordinates(clickScenePos, image_rect)
 
         if self.getMode() == ImagePairEditor.MODE_INSERT:
             if ((self._insert_src is not None and clicked_image == self._image1) or
@@ -485,7 +483,7 @@ class ImagePairEditor(QGraphicsView):
                 self.deleteItem(item)  # FIXME: this sometimes deletes an element twice, which upsets Qt
 
     def contextMenuEvent(self, event):
-        item = self.itemAt(event.pos());
+        item = self.itemAt(event.pos())
 
         items_at_pos = self.items(event.pos())
         if self._image1 in items_at_pos:
@@ -548,13 +546,13 @@ class ImagePairEditor(QGraphicsView):
                 self.addCorrespondence(corr)
         elif action == computeAllKeypointsAction:
             n_features, ok = QInputDialog.getInt(self, "Choose the number of keypoints.", "SIFT keypoints",
-                                                       value=250, min=10, max=5000, step=50)
+                                                 value=250, min=10, max=5000, step=50)
 
             if not ok:
                 return
 
             # Delete any existing keypoint
-            self.deleteAllItems(lambda x: isinstance(x, KeypointItem))
+            self.deleteAllItems(lambda it: isinstance(it, KeypointItem))
 
             img1 = scale_down_image(self._image1_cv)
             img2 = scale_down_image(self._image2_cv)
@@ -579,7 +577,7 @@ class ImagePairEditor(QGraphicsView):
 
         elif action == computeKeypointsAroundHereAction:
             n_features, ok = QInputDialog.getInt(self, "Choose the number of keypoints.", "SIFT keypoints",
-                                                       value=500, min=10, max=5000, step=50)
+                                                 value=500, min=10, max=5000, step=50)
 
             if not ok:
                 return
@@ -587,7 +585,7 @@ class ImagePairEditor(QGraphicsView):
             image_rect = clicked_image.sceneBoundingRect()
             clickScenePos = self.mapToScene(event.pos())
 
-            pt = _pointToRelativeCoordinates(clickScenePos, image_rect)
+            pt = _point_to_relative_coordinates(clickScenePos, image_rect)
 
             img = scale_down_image(clicked_image_cv)
 
@@ -613,7 +611,7 @@ class ImagePairEditor(QGraphicsView):
             self.deleteItem(item)
 
         elif action == removeAllKeypointsAction:
-            self.deleteAllItems(lambda x: isinstance(x, KeypointItem))
+            self.deleteAllItems(lambda it: isinstance(it, KeypointItem))
 
     # Deletes an item and the ones attached to it; if the item was removed already, don't do anything
     def deleteItem(self, item: BaseItem):
@@ -628,7 +626,7 @@ class ImagePairEditor(QGraphicsView):
         scene = self.scene()
         for item in scene.items():
             if isinstance(item, BaseItem):
-                if condition is None or condition(item) == True:
+                if condition is None or condition(item):
                     scene.removeItem(item)
 
     def keyPressEvent(self, event):
@@ -777,12 +775,9 @@ def run_gui():
         while True:
             if len(image_paths) >= 2:
                 break
-            path = QFileDialog.getOpenFileName(None, 'Choose an image')
-            if path:
-                # In PyQt5 the path is a tuple. Once we remove suppot for PyQt4 we can always include this
-                # line
-                if type(path) is tuple:
-                    path, _ = path
+            path_tup = QFileDialog.getOpenFileName(None, 'Choose an image')
+            if path_tup:
+                path, _ = path_tup
                 image_paths.append(path)
             else:
                 sys.exit()
