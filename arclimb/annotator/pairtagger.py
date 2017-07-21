@@ -7,14 +7,16 @@ from typing import List, Union, Callable, cast, NewType, Optional
 
 # TODO(beisner): Decide if we should replace these with 'import *', since  they're getting a bit unruly
 from PyQt5.QtCore import QPointF, QRectF, QLineF, QSize, QSizeF, Qt, pyqtSignal
-from PyQt5.QtGui import QPolygonF, QPainterPath, QPainter, QPixmap, QWheelEvent, QMouseEvent, QColor
+from PyQt5.QtGui import QPolygonF, QPainterPath, QPainter, QPixmap, QWheelEvent, QMouseEvent, QCursor, QColor, QPen
 from PyQt5.QtWidgets import QGraphicsItem, QGraphicsView, QSizePolicy, QGraphicsScene, QMenu, QAction, \
     QMessageBox, QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QButtonGroup, QPushButton, QApplication, \
     QFileDialog, QStyleOptionGraphicsItem, QWidget
 
+
 from arclimb.core.correspondence import DoubleORBMatcher, CorrespondenceFinder
 from arclimb.core.utils.image import scale_down_image
 from arclimb.core import Point, Correspondence
+from arclimb.core import HomographicPointMap
 
 PointUnion = NewType('PointUnion', Union[Point, QPointF])
 
@@ -50,8 +52,10 @@ class BaseItem(QGraphicsItem):
     def getModel(self):
         raise NotImplemented("Subclasses of BaseItem should override getModel")
 
-    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: Optional[QWidget] = None) -> None:
-        painter.setPen(QColor('yellow'))
+    def paint(self, painter, option, widget):
+        pen = QPen(QColor('yellow'))
+        pen.setCosmetic(True)
+        painter.setPen(pen)
 
     # Returns a list of other items that should be deleted if this item is deleted.
     def getConnectedItems(self):
@@ -113,7 +117,6 @@ class PointItem(BaseItem):
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
         pen = painter.pen()
-        pen.setCosmetic(True)
 
         if self.isSelected():
             pen.setWidth(2)
@@ -190,7 +193,7 @@ class CorrespondenceItem(BaseItem):
         self.adjust()
 
     def getModel(self) -> Correspondence:
-        return Correspondence(self.sourceNode.getModel(), self.sourceNode.getModel())
+        return Correspondence(self.sourceNode.getModel(), self.destinationNode.getModel())
 
     def getSourceNode(self) -> PointItem:
         return self.sourceNode
@@ -292,7 +295,7 @@ class KeypointItem(BaseItem):
         return None
 
     def boundingRect(self):
-        r = PointItem.RADIUS
+        r = KeypointItem.RADIUS
         return QRectF(-r, -r, 2 * r, 2 * r)
 
     def shape(self):
@@ -306,8 +309,6 @@ class KeypointItem(BaseItem):
         # painter.setPen(QColor('green'))
 
         pen = painter.pen()
-        pen.setCosmetic(True)
-
         if self.isSelected():
             pen.setWidth(2)
 
@@ -326,6 +327,41 @@ class KeypointItem(BaseItem):
         self.update()
         super().mouseReleaseEvent(event)
 
+
+# noinspection PyPep8Naming
+class GhostItem(BaseItem):
+    """
+    QGraphicsItem used to visualize the map of the current point in the other image, according to
+    """
+
+    TYPE = QGraphicsItem.UserType + 4
+    RADIUS = 8
+
+    def type(self):
+        return GhostItem.TYPE
+
+    def __init__(self, imagePairEditor: 'ImagePairEditor'):
+        super().__init__(imagePairEditor)
+
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations)
+
+    def boundingRect(self):
+        r = KeypointItem.RADIUS
+        return QRectF(-r, -r, 2 * r, 2 * r)
+
+    def shape(self):
+        path = QPainterPath()
+        path.addEllipse(self.boundingRect())
+        return path
+
+    def paint(self, painter, option, widget=None):
+        super().paint(painter, option, widget)
+        pen = painter.pen()
+
+        pen.setColor(QColor(127,255,0))
+
+        painter.setPen(pen)
+        painter.drawEllipse(self.boundingRect())
 
 # noinspection PyPep8Naming
 class ImagePairEditor(QGraphicsView):
@@ -371,6 +407,12 @@ class ImagePairEditor(QGraphicsView):
         for corr in correspondences:
             self.addCorrespondence(corr)
 
+        # Initialize ghost
+        self._ghost = GhostItem(self)
+        self.scene().addItem(self._ghost)
+        self._ghost.hide()
+        self._ghost_enabled = False
+
         self.fitInView()
 
     def addCorrespondence(self, corr: Correspondence):
@@ -406,6 +448,38 @@ class ImagePairEditor(QGraphicsView):
         self._image1.setPixmap(QPixmap(image1))
         self._image2.setPixmap(QPixmap(image2))
         self.fitInView()
+
+    def setGhostEnabled(self, enabled: bool = True) -> None:
+        if self._ghost_enabled == enabled:
+            return
+
+        self._ghost_enabled = enabled
+        if enabled:
+            print("Ghost!")
+            self._ghost_pointmap = HomographicPointMap(self.getCorrespondences())
+
+            # TODO: handle if the PointMap fails to build
+
+            self._updateGhostPosition()
+        else:
+            print("No ghost :(")
+            self._ghost.hide()
+
+    def _updateGhostPosition(self):
+        scenePos = self.mapToScene(self.mapFromGlobal(QCursor.pos()))
+        pt = _point_to_relative_coordinates(scenePos, self._image1.sceneBoundingRect())
+        if 0 <= pt.x <= 1 and 0 <= pt.y <= 1:
+            pt_mapped, _ = self._ghost_pointmap(pt)
+            ghostScenePos = _point_to_absolute_coordinates(pt_mapped, self._image2.sceneBoundingRect())
+
+            print(ghostScenePos)
+
+            self._ghost.setPos(ghostScenePos.x, ghostScenePos.y)
+            self._ghost.show()
+        else:
+            # Cursor out of image1
+            self._ghost.hide()
+
 
     def zoomFactor(self):
         return self._zoom
@@ -480,6 +554,13 @@ class ImagePairEditor(QGraphicsView):
             # TODO: implement stronger deletion tool (e.g.: delete all items in region around the cursor)
             for item in items:
                 self.deleteItem(item)  # FIXME: this sometimes deletes an element twice, which upsets Qt
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        super().mouseMoveEvent(event)
+
+        if self._ghost_enabled:
+            self._updateGhostPosition()
+
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos())
@@ -719,6 +800,10 @@ class ImagePairEditorDialog(QDialog):
         self.modeButtonGroup.buttonClicked[int].connect(lambda id: self.editor.setMode(id))
         self.editor.modeChanged.connect(self.modeChanged)
 
+        self.ghostButton = QPushButton("Ghost")
+        self.ghostButton.setCheckable(True)
+        self.ghostButton.clicked.connect(self.ghostButtonClicked)
+
         okButton = QPushButton("OK")
         okButton.clicked.connect(self.okButtonClicked)
         cancelButton = QPushButton("Cancel")
@@ -727,6 +812,8 @@ class ImagePairEditorDialog(QDialog):
         buttons.addWidget(self.selectButton)
         buttons.addWidget(self.insertButton)
         buttons.addWidget(self.deleteButton)
+        buttons.addSpacing(30)
+        buttons.addWidget(self.ghostButton)
         buttons.addStretch(1)
         buttons.addWidget(okButton)
         buttons.addWidget(cancelButton)
@@ -743,6 +830,9 @@ class ImagePairEditorDialog(QDialog):
 
     def cancelButtonClicked(self):
         self.reject()
+
+    def ghostButtonClicked(self):
+        self.editor.setGhostEnabled(self.ghostButton.isChecked())
 
     def getCorrespondences(self):
         return self.editor.getCorrespondences()
