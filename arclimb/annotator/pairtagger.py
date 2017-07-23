@@ -20,28 +20,6 @@ from arclimb.core import HomographicPointMap
 
 PointUnion = NewType('PointUnion', Union[Point, QPointF])
 
-
-def __point_union_to_point(pt: PointUnion) -> Point:
-    if isinstance(pt, QPointF):
-        pt = cast(QPointF, pt)
-        pt = Point(pt.x(), pt.y())
-    else:
-        pt = cast(Point, pt)
-    return pt
-
-
-def _point_to_relative_coordinates(pt: PointUnion, rect: QRectF) -> Point:
-    pt = __point_union_to_point(pt)
-    x = (pt.x - rect.x()) / rect.width()
-    y = (pt.y - rect.y()) / rect.height()
-    return Point(x, y)
-
-
-def _point_to_absolute_coordinates(pt: PointUnion, rect: QRectF) -> Point:
-    pt = __point_union_to_point(pt)
-    return Point(rect.x() + rect.width() * pt.x, rect.y() + rect.height() * pt.y)
-
-
 # noinspection PyPep8Naming
 class BaseItem(QGraphicsItem):
     def __init__(self, imagePairEditor):
@@ -99,11 +77,11 @@ class PointItem(BaseItem):
         return self.model
 
     def _setPosFromModel(self, model: Point):
-        p = _point_to_absolute_coordinates(model, self.boundToImg.sceneBoundingRect())
+        p = model.toAbsoluteCoordinates(self.boundToImg.sceneBoundingRect())
         self.setPos(p.x, p.y)
 
     def _updateModel(self):
-        self.model = _point_to_relative_coordinates(self.pos(), self.boundToImg.sceneBoundingRect())
+        self.model = Point(self.pos()).toRelativeCoordinates(self.boundToImg.sceneBoundingRect())
 
     def boundingRect(self):
         r = PointItem.RADIUS
@@ -280,7 +258,7 @@ class KeypointItem(BaseItem):
 
         self.boundToImg = boundTo
 
-        p = _point_to_absolute_coordinates(position, boundTo.sceneBoundingRect())
+        p = position.toAbsoluteCoordinates(boundTo.sceneBoundingRect())
         self.setPos(p.x, p.y)
 
         self.setCursor(Qt.PointingHandCursor)
@@ -371,7 +349,7 @@ class ImagePairEditor(QGraphicsView):
 
     modeChanged = pyqtSignal(int)  # Emitted when mode changes
 
-    def __init__(self, parent, image1: str, image2: str, correspondences: List[Correspondence] = []):
+    def __init__(self, parent, image1: str, image2: str, correspondences: Optional[List[Correspondence]] = None):
         super().__init__(parent)
         self._zoom = 0
 
@@ -404,8 +382,9 @@ class ImagePairEditor(QGraphicsView):
 
         self.setImages(image1, image2)
 
-        for corr in correspondences:
-            self.addCorrespondence(corr)
+        if correspondences is not None:
+            for corr in correspondences:
+                self.addCorrespondence(corr)
 
         # Initialize ghost
         self._ghost = GhostItem(self)
@@ -455,24 +434,20 @@ class ImagePairEditor(QGraphicsView):
 
         self._ghost_enabled = enabled
         if enabled:
-            print("Ghost!")
             self._ghost_pointmap = HomographicPointMap(self.getCorrespondences())
 
             # TODO: handle if the PointMap fails to build
 
             self._updateGhostPosition()
         else:
-            print("No ghost :(")
             self._ghost.hide()
 
     def _updateGhostPosition(self):
         scenePos = self.mapToScene(self.mapFromGlobal(QCursor.pos()))
-        pt = _point_to_relative_coordinates(scenePos, self._image1.sceneBoundingRect())
+        pt = Point(scenePos).toRelativeCoordinates(self._image1.sceneBoundingRect())
         if 0 <= pt.x <= 1 and 0 <= pt.y <= 1:
             pt_mapped, _ = self._ghost_pointmap(pt)
-            ghostScenePos = _point_to_absolute_coordinates(pt_mapped, self._image2.sceneBoundingRect())
-
-            print(ghostScenePos)
+            ghostScenePos = pt_mapped.toAbsoluteCoordinates(self._image2.sceneBoundingRect())
 
             self._ghost.setPos(ghostScenePos.x, ghostScenePos.y)
             self._ghost.show()
@@ -529,7 +504,7 @@ class ImagePairEditor(QGraphicsView):
             # If a keypoint was clicked, adjust the coordinates of the click to its coordinates
             clickScenePos = keypointItems[0].pos()
 
-        pt = _point_to_relative_coordinates(clickScenePos, image_rect)
+        pt = Point(clickScenePos).toRelativeCoordinates(image_rect)
 
         if self.getMode() == ImagePairEditor.MODE_INSERT:
             if ((self._insert_src is not None and clicked_image == self._image1) or
@@ -665,7 +640,7 @@ class ImagePairEditor(QGraphicsView):
             image_rect = clicked_image.sceneBoundingRect()
             clickScenePos = self.mapToScene(event.pos())
 
-            pt = _point_to_relative_coordinates(clickScenePos, image_rect)
+            pt = Point(clickScenePos).toRelativeCoordinates(image_rect)
 
             img = scale_down_image(clicked_image_cv)
 
@@ -770,7 +745,7 @@ class ImagePairEditor(QGraphicsView):
 
 # noinspection PyPep8Naming
 class ImagePairEditorDialog(QDialog):
-    def __init__(self, image1: str, image2: str, correspondences: List[Correspondence] = [], parent=None):
+    def __init__(self, image1: str, image2: str, correspondences: Optional[List[Correspondence]] = None, parent=None):
         super().__init__(parent)
 
         self.editor = ImagePairEditor(self, image1, image2, correspondences)
