@@ -1,17 +1,14 @@
-import networkx as nw
 import json
+from arclimb.core import Graph, Node, Correspondence
 
 
-def from_json(graph_fn: str, node_fields: dict, ) -> nw.Graph:
+def from_json(graph_fn: str) -> Graph:
     with open(graph_fn, 'r') as graph_file:
         graph_dict = json.load(graph_file)
 
-    g = nw.Graph()
+    return Graph.from_dict(graph_dict)
 
-    for node_dict in graph_dict['nodes']:
-        g.add_node()
-    pass
 
-def to_json(graph: nw.Graph, filename: str, fields_to_include: dict) -> None:
-
-    pass
+def to_json(graph: Graph, filename: str) -> None:
+    with open(filename, 'w') as file:
+        json.dump(graph.to_dict(), file)

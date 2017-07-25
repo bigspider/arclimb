@@ -98,7 +98,7 @@ class Point:
         return "%s(%r, %r)" % (self.__class__.__name__, self.x, self.y)
 
     def asTuple(self) -> Tuple[float, float]:
-        return (self.x, self.y)
+        return self.x, self.y
 
     def asQPointF(self) -> QPointF:
         return QPointF(self.x, self.y)
@@ -118,17 +118,37 @@ class Point:
     def inRect(self, rect: QRectF) -> bool:
         return self.asQPointF() in rect
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'x': self.x,
+            'y': self.y,
+        }
 
-Correspondence = NamedTuple('Correspondence', [
-    ('point1', Point),
-    ('point2', Point),
-])
+
+class Correspondence(NamedTuple('Correspondence', [('point1', Point), ('point2', Point)])):
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'point1': self.point1.to_dict(),
+            'point2': self.point2.to_dict(),
+        }
+
+    @staticmethod
+    def from_dict(corr_dict: Dict[str, Any]):
+        point1 = Point(**corr_dict['point1'])
+        point2 = Point(**corr_dict['point2'])
+        return Correspondence(point1, point2)
 
 
 # Create a node class, and make it have an optional argument
 class Node(NamedTuple('Node', [('id', NodeId), ('attributes', Dict[str, Any])])):
     def __hash__(self):
         return hash(self.id)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'attributes': self.attributes,
+        }
 
 Node.__new__.__defaults__ = ({},)
 
@@ -164,3 +184,35 @@ class Graph(object):
             return set()
         else:
             return self.__graph[node1_id][node2_id]['correspondences']
+
+    def to_dict(self) -> Dict[str, Any]:
+        nodes = self.get_nodes()
+        edges = self.__graph.edges(data=True)
+
+        print("EDGES")
+        print(self.__graph.edges(data=True))
+        print()
+        return {
+            'nodes': [node.to_dict() for node in nodes],
+            'edges': [{
+                'src': src,
+                'dest': dest,
+                'correspondences': [corr.to_dict() for corr in attr['correspondences']]
+            } for src, dest, attr in edges],
+        }
+
+    @staticmethod
+    def from_dict(graph_dict: Dict[str, Any]):
+        g = Graph()
+
+        for node_dict in graph_dict['nodes']:
+            node = Node(**node_dict)
+            g.add_node(node)
+
+        for edge_dict in graph_dict['edges']:
+            src = edge_dict['src']
+            dest = edge_dict['dest']
+            for corr_dict in edge_dict['correspondences']:
+                g.add_correspondence(src, dest, Correspondence.from_dict(corr_dict))
+
+        return g
