@@ -12,13 +12,13 @@ from PyQt5.QtWidgets import QGraphicsItem, QGraphicsView, QSizePolicy, QGraphics
     QMessageBox, QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QButtonGroup, QPushButton, QApplication, \
     QFileDialog, QStyleOptionGraphicsItem, QWidget
 
-
 from arclimb.core.correspondence import DoubleORBMatcher, CorrespondenceFinder
 from arclimb.core.utils.image import scale_down_image
 from arclimb.core import Point, Correspondence
 from arclimb.core import HomographicPointMap
 
 PointUnion = NewType('PointUnion', Union[Point, QPointF])
+
 
 # noinspection PyPep8Naming
 class BaseItem(QGraphicsItem):
@@ -30,7 +30,7 @@ class BaseItem(QGraphicsItem):
     def getModel(self):
         raise NotImplemented("Subclasses of BaseItem should override getModel")
 
-    def paint(self, painter, option, widget):
+    def paint(self, painter: QPainter, option: 'QStyleOptionGraphicsItem', widget: Optional[QWidget] = None) -> None:
         pen = QPen(QColor('yellow'))
         pen.setCosmetic(True)
         painter.setPen(pen)
@@ -218,7 +218,7 @@ class CorrespondenceItem(BaseItem):
         path.addPolygon(polygon)
         return path
 
-    def paint(self, painter: QPainter, option, widget):
+    def paint(self, painter: QPainter, option: 'QStyleOptionGraphicsItem', widget: Optional[QWidget] = ...) -> None:
         super().paint(painter, option, widget)
 
         assert self.sourceNode is not None and self.destinationNode is not None
@@ -336,10 +336,11 @@ class GhostItem(BaseItem):
         super().paint(painter, option, widget)
         pen = painter.pen()
 
-        pen.setColor(QColor(127,255,0))
+        pen.setColor(QColor(127, 255, 0))
 
         painter.setPen(pen)
         painter.drawEllipse(self.boundingRect())
+
 
 # noinspection PyPep8Naming
 class ImagePairEditor(QGraphicsView):
@@ -351,6 +352,7 @@ class ImagePairEditor(QGraphicsView):
 
     def __init__(self, parent, image1: str, image2: str, correspondences: Optional[List[Correspondence]] = None):
         super().__init__(parent)
+
         self._zoom = 0
 
         self._insert_src = None
@@ -392,7 +394,7 @@ class ImagePairEditor(QGraphicsView):
         self._ghost.hide()
         self._ghost_enabled = False
 
-        self.fitInView()
+        self.fitToImages()
 
     def addCorrespondence(self, corr: Correspondence):
         assert corr is not None
@@ -406,27 +408,27 @@ class ImagePairEditor(QGraphicsView):
     def showEvent(self, event):
         super().showEvent(event)
 
-        self.fitInView()
+        self.fitToImages()
 
-    def fitInView(self):
+    def fitToImages(self):
         rect1 = QRectF(self._image1.pixmap().rect())
         self._image2.setX(rect1.width())
         rect2 = QRectF(self._image2.pixmap().rect())
 
-        heigth = max(rect1.height(), rect2.height())
+        height = max(rect1.height(), rect2.height())
         width = rect1.width() + rect2.width()
-        combined_rect = QRectF(QPointF(0, 0), QSizeF(width, heigth))
+        combined_rect = QRectF(QPointF(0, 0), QSizeF(width, height))
         self.setSceneRect(combined_rect)
         super().fitInView(combined_rect, Qt.KeepAspectRatio)
 
-    def setImages(self, image1: QPixmap, image2: QPixmap):
+    def setImages(self, image1: str, image2: str):
         assert image1 is not None and image2 is not None
 
         self._zoom = 0
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self._image1.setPixmap(QPixmap(image1))
         self._image2.setPixmap(QPixmap(image2))
-        self.fitInView()
+        self.fitToImages()
 
     def setGhostEnabled(self, enabled: bool = True) -> None:
         if self._ghost_enabled == enabled:
@@ -455,7 +457,6 @@ class ImagePairEditor(QGraphicsView):
             # Cursor out of image1
             self._ghost.hide()
 
-
     def zoomFactor(self):
         return self._zoom
 
@@ -474,7 +475,7 @@ class ImagePairEditor(QGraphicsView):
         if self._zoom > 0:
             self.scale(factor, factor)
         elif self._zoom == 0:
-            self.fitInView()
+            self.fitToImages()
         else:
             self._zoom = 0
 
@@ -494,7 +495,7 @@ class ImagePairEditor(QGraphicsView):
             return
 
         # Only keep the BaseItems
-        items = [item for item in items if isinstance(item, BaseItem)]
+        items = [cast(BaseItem, item) for item in items if isinstance(item, BaseItem)]
 
         image_rect = clicked_image.sceneBoundingRect()
         clickScenePos = self.mapToScene(event.pos())
@@ -521,7 +522,8 @@ class ImagePairEditor(QGraphicsView):
 
             # If both nodes are inserted, we add the edge and we are done
             if self._insert_src is not None and self._insert_dst is not None:
-                self.scene().addItem(CorrespondenceItem(self, self._insert_src, self._insert_dst))
+                self.scene().addItem(
+                    CorrespondenceItem(self, cast(PointItem, self._insert_src), cast(PointItem, self._insert_dst)))
                 self._insert_src = None
                 self._insert_dst = None
         elif self.getMode() == ImagePairEditor.MODE_DELETE:
@@ -535,7 +537,6 @@ class ImagePairEditor(QGraphicsView):
 
         if self._ghost_enabled:
             self._updateGhostPosition()
-
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos())
@@ -693,7 +694,7 @@ class ImagePairEditor(QGraphicsView):
             # Selection mode
             # Cancel or backspace deletes all selected items
             if event.key() in [Qt.Key_Delete, Qt.Key_Backspace]:
-                for item in self.scene().selectedItems():
+                for item in [BaseItem(it) for it in self.scene().selectedItems() if isinstance(it, BaseItem)]:
                     self.deleteItem(item)
 
         # Prevent dialog from closing on escape
@@ -740,10 +741,11 @@ class ImagePairEditor(QGraphicsView):
         return self._currentMode
 
     def getCorrespondences(self) -> List[Correspondence]:
-        return [item.getModel() for item in self.scene().items() if isinstance(item, CorrespondenceItem)]
+        return [cast(CorrespondenceItem, item).getModel() for item in self.scene().items() if
+                isinstance(item, CorrespondenceItem)]
 
 
-# noinspection PyPep8Naming
+# noinspection PyPep8Naming,PyUnresolvedReferences
 class ImagePairEditorDialog(QDialog):
     def __init__(self, image1: str, image2: str, correspondences: Optional[List[Correspondence]] = None, parent=None):
         super().__init__(parent)
@@ -772,7 +774,7 @@ class ImagePairEditorDialog(QDialog):
         self.modeButtonGroup.addButton(self.insertButton, ImagePairEditor.MODE_INSERT)
         self.modeButtonGroup.addButton(self.deleteButton, ImagePairEditor.MODE_DELETE)
         # We use the mode as button id
-        self.modeButtonGroup.buttonClicked[int].connect(lambda id: self.editor.setMode(id))
+        self.modeButtonGroup.buttonClicked[int].connect(lambda mode: self.editor.setMode(mode))
         self.editor.modeChanged.connect(self.modeChanged)
 
         self.ghostButton = QPushButton("Ghost")
@@ -826,7 +828,6 @@ class ImagePairEditorDialog(QDialog):
 
 def run_gui():
     import sys
-    import random
 
     app = QApplication(sys.argv)
 
@@ -844,7 +845,7 @@ def run_gui():
                 path, _ = path_tup
                 image_paths.append(path)
             else:
-                sys.exit()
+                app.exit()
 
     corr, accepted = ImagePairEditorDialog.run(image_paths[0], image_paths[1], correspondences)
     print(corr)
