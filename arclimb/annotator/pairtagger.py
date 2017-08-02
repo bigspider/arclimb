@@ -378,7 +378,6 @@ class ImagePairEditor(QGraphicsView):
 
         # Also open the images in OpenCV format, since converting between Mat and QImage is not trivial.
         # TODO: find a better way.
-        print(image1)
         self._image1_cv = cv2.imread(image1)
         self._image2_cv = cv2.imread(image2)
 

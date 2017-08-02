@@ -1,13 +1,12 @@
 import networkx as nw
 import math
-from typing import NamedTuple, Tuple, Dict, Set, Any, NewType, Union
+from typing import NamedTuple, Tuple, Dict, Set, Iterable, Any, NewType, Union
 
 from PyQt5.QtCore import QPointF, QRectF
 
 NodeId = NewType('NodeId', str)
 
 PointUnion = NewType('PointUnion', Union['Point', QPointF, Tuple[float, float]])
-
 
 # noinspection PyPep8Naming
 class Point:
@@ -154,8 +153,8 @@ Node.__new__.__defaults__ = ({},)
 
 
 class Graph(object):
-    def __init__(self):
-        self.__graph = nw.Graph()
+    def __init__(self, undirected=True):
+        self.__graph = nw.Graph(undirected=undirected)
 
     def add_node(self, node: Node) -> None:
         self.__graph.add_node(node.id, node=node)
@@ -163,10 +162,28 @@ class Graph(object):
     def remove_node(self, node_id: NodeId) -> None:
         self.__graph.remove_node(node_id)
 
-    def add_correspondence(self, node1_id: NodeId, node2_id: NodeId, correspondence: Correspondence) -> None:
+    def has_node(self, node_id: NodeId) -> bool:
+        return self.__graph.has_node(node_id)
+
+    def has_edge(self, node1_id: NodeId, node2_id: NodeId) -> bool:
+        return self.__graph.has_edge(node1_id, node2_id)
+
+    def add_edge(self, node1_id: NodeId, node2_id: NodeId) -> None:
         if not self.__graph.has_edge(node1_id, node2_id):
             self.__graph.add_edge(node1_id, node2_id, correspondences=set())
 
+    def remove_edge(self, node1_id: NodeId, node2_id: NodeId) -> None:
+        return self.__graph.remove_edge(node1_id, node2_id)
+
+    def set_correspondences(self, node1_id: NodeId, node2_id: NodeId, correspondences: Iterable[Correspondence]) -> None:
+        self.add_edge(node1_id, node2_id)
+        self.__graph[node1_id][node2_id]['correspondences'] = set(correspondences)
+
+    def remove_correspondences(self, node1_id: NodeId, node2_id: NodeId) -> None:
+        self.set_correspondences(set())
+
+    def add_correspondence(self, node1_id: NodeId, node2_id: NodeId, correspondence: Correspondence) -> None:
+        self.add_edge(node1_id, node2_id)
         self.__graph[node1_id][node2_id]['correspondences'].add(correspondence)
 
     def remove_correspondence(self, node1_id: NodeId, node2_id: NodeId, correspondence: Correspondence) -> None:
@@ -189,9 +206,6 @@ class Graph(object):
         nodes = self.get_nodes()
         edges = self.__graph.edges(data=True)
 
-        print("EDGES")
-        print(self.__graph.edges(data=True))
-        print()
         return {
             'nodes': [node.to_dict() for node in nodes],
             'edges': [{
