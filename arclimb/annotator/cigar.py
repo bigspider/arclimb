@@ -149,6 +149,7 @@ class Cigar(cmd.Cmd):
         # any preprocessing of line goes here
         return line
 
+
 def run_cigar():
     app = QApplication(sys.argv)
 

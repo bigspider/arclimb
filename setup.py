@@ -9,6 +9,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pairtagger = arclimb.annotator:run_gui',
+            'cigar = arclimb.annotator:run_cigar',
         ],
     }
 )
