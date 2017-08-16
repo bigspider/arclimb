@@ -130,11 +130,13 @@ class PointItem(BaseItem):
                 return newPos
         elif change == QGraphicsItem.ItemPositionHasChanged:
             # Signal a change of position to the CorrespondenceItem and the editor
-            self.correspondenceItem.adjust()
+            if self.correspondenceItem is not None:
+                self.correspondenceItem.adjust()
             self._updateModel()
         if change == QGraphicsItem.ItemSelectedHasChanged:
             # When a node is selected, also the CorrespondenceItem needs to update
-            self.correspondenceItem.update()
+            if self.correspondenceItem is not None:
+                self.correspondenceItem.update()
 
         return super().itemChange(change, value)
 
@@ -674,7 +676,7 @@ class ImagePairEditor(QGraphicsView):
         to_remove.append(item)
 
         scene = self.scene()
-        for item in to_remove:
+        for item in set(to_remove):
             scene.removeItem(item)
 
     def deleteAllItems(self, condition: Callable[[BaseItem], bool] = None):
@@ -693,7 +695,7 @@ class ImagePairEditor(QGraphicsView):
             # Selection mode
             # Cancel or backspace deletes all selected items
             if event.key() in [Qt.Key_Delete, Qt.Key_Backspace]:
-                for item in [BaseItem(it) for it in self.scene().selectedItems() if isinstance(it, BaseItem)]:
+                for item in [it for it in self.scene().selectedItems() if isinstance(it, BaseItem)]:
                     self.deleteItem(item)
 
         # Prevent dialog from closing on escape

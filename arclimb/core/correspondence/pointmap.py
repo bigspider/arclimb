@@ -24,7 +24,7 @@ class PointMap(metaclass=ABCMeta):
 # noinspection PyPep8Naming
 class HomographicPointMap(PointMap):
     def __init__(self, correspondences: List[Correspondence]):
-        super().__init__()
+        super().__init__(correspondences)
         src_pts = np.float32([[corr.point1.x, corr.point1.y] for corr in correspondences]).reshape(-1, 1, 2)
         dst_pts = np.float32([[corr.point2.x, corr.point2.y] for corr in correspondences]).reshape(-1, 1, 2)
 
