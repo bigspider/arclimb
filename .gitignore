@@ -140,4 +140,4 @@ ENV/
 .ropeproject
 
 .idea/
-climbing-data/
+climbing-data/**/*.[jJ][pP][gG]
