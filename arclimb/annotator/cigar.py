@@ -21,7 +21,7 @@ class Cigar(cmd.Cmd):
     def __init__(self, filename=None):
         super().__init__()
         if filename is not None:
-            open(filename)
+            self.open(filename)
 
     # ignore empty commands
     def emptyline(self):
@@ -151,11 +151,12 @@ class Cigar(cmd.Cmd):
 
 
 def run_cigar():
-    app = QApplication(sys.argv)
-
-    Cigar().cmdloop()
-
-if __name__ == '__main__':
     # TODO: add command line arguments and a default behaviour (e.g.: preadd all jpegs in current folder)
 
+    filename = "labels.json"
+
+    app = QApplication(sys.argv)
+    Cigar(filename if os.path.isfile(filename) else None).cmdloop()
+
+if __name__ == '__main__':
     run_cigar()
